@@ -675,7 +675,276 @@ def initialize():
 # In[13]:
 
 
+def get_vehicle_count(boxes, class_names):
+    
+    list_of_vehicles = ['car', 'truck', 'bus', 'motorbike', 'bicycle']
+#     list_of_vehicles = ['car', 'truck', 'bus', 'motorbike', 'bicycle', 'ambulance', 'fire engine', 'auto rickshaw']
+    
+    total_vehicle_count = 0 # total vechiles present in the image
+    dict_vehicle_count = {} # dictionary with count of each distinct vehicles detected
+    
+    for i in range(len(boxes)):
 
+            class_name = class_names[i]
+       
+            if(class_name in list_of_vehicles):
+                total_vehicle_count += 1
+                dict_vehicle_count[class_name] = dict_vehicle_count.get(class_name,0) + 1
+    print(total_vehicle_count, dict_vehicle_count)
+    return total_vehicle_count, dict_vehicle_count
+
+def detectVehicles():
+    uuid_var = str(uuid.uuid4())
+    camera.capture('/home/pi/Downloads/project/images/input/'+ uuid_var +'.jpg')
+    coco_names_path = '/home/pi/Downloads/project/Assets/coco.names'
+    weightsPath = '/home/pi/Downloads/project/Assets/yolov3.weights'
+    configPath = '/home/pi/Downloads/project/Assets/yolov3.cfg'
+
+    image_path = '/home/pi/Downloads/project/images/input/'+ uuid_var +'.jpg'
+    video_path = '../Assets/videos/vehicles1.mp4'
+    
+    # load the COCO class labels our YOLO model was trained on
+
+    Labels = []
+    with open(coco_names_path,'r',encoding='utf8') as f:
+        Labels = [line.strip() for line in f.readlines()]
+        
+        
+    # initialize a list of colors to represent each possible class label
+    np.random.seed(42)
+    COLORS = np.random.randint(0, 255, size=(len(Labels), 3),dtype="uint8")
+    
+    # load our YOLO object detector trained on COCO dataset (80 classes)
+    # and determine only the *output* layer names that we need from YOLO
+    net = cv2.dnn.readNetFromDarknet(configPath,weightsPath)
+    layers_names = net.getLayerNames()
+    output_layers = [layers_names[i - 1] for i in net.getUnconnectedOutLayers()]
+    
+    # initialize the video stream, pointer to output video file, and
+    # frame dimensions
+    vs = cv2.VideoCapture(image_path)
+    writer = None
+    (W, H) = (None, None)
+    fps=vs.get(cv2.CAP_PROP_FPS)
+    
+    # try to determine the total number of frames in the video file
+    try:
+        prop = cv2.cv.CV_CAP_PROP_FRAME_COUNT if imutils.is_cv2() \
+            else cv2.CAP_PROP_FRAME_COUNT
+        total = int(vs.get(prop))
+        print("[INFO] {} total frames in video".format(total))
+
+    # an error occurred while trying to determine the total
+    # number of frames in the video file
+    except:
+        print("[INFO] could not determine # of frames in video")
+        print("[INFO] no approx. completion time can be provided")
+        total = -1
+    
+    # looping over the frames from the video file stream
+    while True:
+        # read the next frame from the file
+        (grabbed, frame) = vs.read()
+
+        # if the frame was not grabbed, then we have reached the end
+        # of the stream
+        if not grabbed:
+            break
+
+        # if the frame dimensions are empty, grab them
+        if W is None or H is None:
+            (H, W) = frame.shape[:2]
+
+        # construct a blob from the input frame and then perform a forward
+        # pass of the YOLO object detector, giving us our bounding boxes
+        # and associated probabilities
+        blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (416, 416),swapRB=True, crop=False)
+        net.setInput(blob)
+        start = time.time()
+        layerOutputs = net.forward(output_layers)
+        end = time.time()
+
+        # initialize our lists of detected bounding boxes, confidences,
+        # and class IDs, respectively
+        boxes = []
+        confidences = []
+        classIDs = []
+        classname = []
+    # print(layerOutputs)
+        # loop over each of the layer outputs
+        for output in layerOutputs:
+            # loop over each of the detections
+            for detection in output:
+                # extract the class ID and confidence (i.e., probability)
+                # of the current object detection
+
+    # print(detection)
+                scores = detection[5:]
+                classID = np.argmax(scores)
+                confidence = scores[classID]
+
+                # filter out weak predictions by ensuring the detected
+                # probability is greater than the minimum probability
+                if confidence > 0.5:
+                    # scale the bounding box coordinates back relative to
+                    # the size of the image, keeping in mind that YOLO
+                    # actually returns the center (x, y)-coordinates of
+                    # the bounding box followed by the boxes' width and
+                    # height
+                    box = detection[0:4] * np.array([W, H, W, H])
+                    (centerX, centerY, width, height) = box.astype("int")
+
+                    # use the center (x, y)-coordinates to derive the top
+                    # and and left corner of the bounding box
+                    x = int(centerX - (width / 2))
+                    y = int(centerY - (height / 2))
+
+                    # update our list of bounding box coordinates,
+                    # confidences, and class IDs
+                    boxes.append([x, y, int(width), int(height)])
+                    confidences.append(float(confidence))
+                    classIDs.append(classID)
+                    classname.append(Labels[classID])
+
+        # apply non-maxima suppression to suppress weak, overlapping
+        # bounding boxes
+        idxs = cv2.dnn.NMSBoxes(boxes, confidences, 0.5,0.5)
+
+
+        # ensure at least one detection exists
+        if len(idxs) > 0:
+            # loop over the indexes we are keeping
+            for i in idxs.flatten():
+                # extract the bounding box coordinates
+                (x, y) = (boxes[i][0], boxes[i][1])
+                (w, h) = (boxes[i][2], boxes[i][3])
+
+                # draw a bounding box rectangle and label on the frame
+                color = [int(c) for c in COLORS[classIDs[i]]]
+
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+
+                text = "{}: {:.4f}".format(Labels[classIDs[i]],confidences[i])
+
+                cv2.putText(frame, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        # cv2.imshow("frame",frame)
+        # cv2.waitKey(0)
+        # check if the video writer is None
+#         print("idxs --> ",idxs)
+#         print("init boxes-->",boxes)
+#         print("init names-->",classname)
+
+        boxes = [boxes[i] for i in idxs]
+        classname = [classname[i] for i in idxs]
+
+    #     print("final boxes -->",boxes)
+    #     print("final names -->",classname)
+        total_vehicles, each_vehicle = get_vehicle_count(boxes, classname)
+        # print("Total vehicles in image", total_vehicles)
+        # print("Each vehicles count in image", each_vehicle)
+        if writer is None:
+            # initialize our video writer
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter('/home/pi/Downloads/project/images/output/predictedResult.jpeg', fourcc, 20,
+                (frame.shape[1], frame.shape[0]), True)
+
+            # some information on processing single frame
+            if total > 0:
+                elap = (end - start)
+                print("[INFO] single frame took {:.4f} seconds".format(elap))
+                print("[INFO] estimated total time to finish: {:.4f}".format(
+                    elap * total))
+
+        # write the output frame to disk
+        writer.write(frame)
+
+    # release the file pointers
+    # print("[INFO] cleaning up...")
+    # writer.release()
+    # vs.release()
+    
+    # car=each_vehicle.get('car',0)
+    # motorbike=each_vehicle.get('motorbike',0)
+    # bicycle=each_vehicle.get('bicycle',0)
+    # bus=each_vehicle.get('bus',0)
+    # truck=each_vehicle.get('truck',0)
+    
+    
+    # print(car,motorbike,bicycle,bus,truck)
+    return each_vehicle
+    
+    
+
+def setTime():
+
+    global noOfCars, noOfBikes, noOfBuses, noOfTrucks, noOfRickshaws, noOfAmbulances, noOffireTrucks, noOfPoliceCars, noOfLanes
+    global carTime, busTime, truckTime, rickshawTime, bikeTime
+
+    noOfCars, noOfBuses, noOfTrucks, noOfRickshaws, noOfBikes, noOfAmbulances, noOffireTrucks, noOfPoliceCars = 0, 0, 0, 0, 0, 0, 0, 0
+
+    # vehicle_dict = detectVehicles()
+
+    # for key,value in vehicle_dict.items():
+
+    #     if(key == 'car'):
+    #         noOfCars += value
+    #     elif(key == 'bus'):
+    #         noOfBuses += value
+    #     elif(key == 'truck'):
+    #         noOfTrucks += value
+    #     elif(key == 'motorbike'):
+    #         noOfBikes += value
+        
+    for i in range(0, roadLanes):
+
+        for j in range(len(vehicles[directionNumbers[nextGreen]][i])):
+
+            vehicle = vehicles[directionNumbers[nextGreen]][i][j]
+
+            if(vehicle.crossed == 0):
+                vclass = vehicle.vehicleClass
+ 
+                if(vclass == 'car'):
+                    noOfCars += 1
+                elif(vclass == 'bus'):
+                    noOfBuses += 1
+                elif(vclass == 'truck'):
+                    noOfTrucks += 1
+                elif(vclass == 'motorbike'):
+                    noOfBikes += 1
+                elif(vclass == 'rickshaw'):
+                    noOfRickshaws += 1
+                elif(vclass == 'ambulance'):
+                    noOfAmbulances += 1
+                elif(vclass == 'fireTruck'):
+                    noOffireTrucks += 1
+                
+
+
+#     print("For Vehicles Going = ",directionNumbers[(currentGreen+1)%noOfSignals])
+#     print("Cars = ",noOfCars)
+#     print("Autos = ",noOfRickshaws)
+#     print("Buses = ",noOfBuses)
+#     print("Trucks = ",noOfTrucks)
+#     print("Bikes = ",noOfBikes)
+
+    # total_vehicles = noOfCars + noOfRickshaws + noOfBuses + noOfTrucks + noOfBikes
+
+    greenTime = math.ceil(((noOfCars*carTime) + (noOfRickshaws*rickshawTime) + (noOfBuses*busTime) + (noOfTrucks*truckTime) + (
+        noOfBikes*bikeTime) + (noOfAmbulances*ambulanceTime) + (noOffireTrucks*fireTruckTime) + (noOfPoliceCars*policeCarTime))/(noOfLanes+1))
+
+    print('Green Time: ', greenTime)
+    if(greenTime < defaultMinimum):
+        greenTime = defaultMinimum
+    elif(greenTime > defaultMaximum):
+        greenTime = defaultMaximum
+
+    signals[(nextGreen) % (noOfSignals)].green = greenTime
+    buffer = defaultMaximum - greenTime
+
+    signals[(nextGreen + 1) % (noOfSignals)].red -= buffer
+    signals[(nextGreen + 2) % (noOfSignals)].red -= buffer
 
 
 
